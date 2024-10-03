@@ -1,0 +1,5 @@
+evaluate为啥跑不通？
+应该是RoPE部分没有写出符合原作者期望的代码
+因为老是那个逐元素相乘步骤出错哇
+evaluate部分输入的句子是没有padding的，所以说长度远小于blocksize
+所以原RoPE部分代码需要能贴合不同的长度的输入？虽然对于pretrain部分来说已经完成padding了？
