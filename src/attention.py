@@ -38,14 +38,15 @@ def precompute_rotary_emb(dim, max_positions):
     rope_cache = None
     # TODO: [part g]
     ### YOUR CODE HERE ###
-    rope_cache = torch.ones(max_positions, int(dim/2), 2)
+    rope_cache = torch.ones(int(dim/2), max_positions, 2)
     for i in range(1, int(dim/2)):
-        theta_i = int(pow(10000, -2 * (i - 1) / dim))
+        # theta_i = int(pow(10000, -2 * (i - 1) / dim))
+        theta_i = pow(10000, -2 * (i - 1) / dim)
         for t in range(max_positions):
             sin_t_theta_i = math.sin(t * theta_i)
             cos_t_theta_i = math.cos(t * theta_i)
-            rope_cache[t, i, 0] = sin_t_theta_i
-            rope_cache[t, i, 1] = cos_t_theta_i
+            rope_cache[i, t, 1] = sin_t_theta_i
+            rope_cache[i, t, 0] = cos_t_theta_i
     ### END YOUR CODE ###
     return rope_cache
 
@@ -63,23 +64,19 @@ def apply_rotary_emb(x, rope_cache):
     # from the length of the precomputed values. In this case, you should use
     # truncate the precomputed values to match the length of the sequence.
 
-    rotated_x = None
     ### YOUR CODE HERE ###
-    B, n_head, T, hs = x.shape  # hs-hidden_size
-    x = x.reshape(B, n_head, T, hs//2, 2)
-    # 让列数为2，分别代表实部和虚部，现在x的维度为B(batch_size), T(sequence_length), self.n_head, C(embedding_size) // self.n_head //2, 2
-    # 因为是positional_embeddding，所以把self.n_head个注意力头合并起来(必须合并，需要知道每个元素在整个句子sequence_length个字符中的位置啊)
-    # 然后再和rope_cache(embedding_size/2=128, sequence_length=128)相乘得到位置编码
-    x = torch.view_as_complex(x)  # B(batch_size), T(sequence_length), self.n_head, C(embedding_size) // self.n_head //2
-    x = x.reshape(B, T, -1)  # B(batch_size), T(sequence_length), C(embedding_size)//2
-    x = torch.permute(x, [0, 2, 1])  # B(batch_size), C(embedding_size)//2, T(sequence_length)
-    rope_cache = torch.view_as_complex(rope_cache)  # C(embedding_size)//2=128, T(sequence_length)
-    rope_cache = rope_cache.unsqueeze(0)  # 1, C(embedding_size)//2=128, T(sequence_length)
-    rotated_x = rope_cache * x  # B(batch_size), C(embedding_size)//2, T(sequence_length)
-    rotated_x = torch.permute(rotated_x, [0, 2, 1])  # B(batch_size), T(sequence_length), C(embedding_size)//2
-    rotated_x = rotated_x.reshape(B, n_head, T, hs//2)  # B(batch_size), self.n_head, T(sequence_length), C(embedding_size)//2/self.n_head
-    rotated_x = torch.view_as_real(rotated_x)
-    rotated_x = rotated_x.reshape(B, n_head, T, hs)
+    B, n_head, T, hs = x.shape
+    x = x.view(B, n_head, T, hs // 2, 2)  # Reshape to (B, n_head, T, hs/2, 2)
+    x = torch.permute(x, [0, 1, 3, 2, 4])  # Reshape to (B, n_head, hs/2, T, 2)
+    x = torch.view_as_complex(x)  # Convert to complex type
+
+    rope_cache = rope_cache[:, :T, :]  # Truncate rope_cache to match T
+    rope_cache = torch.view_as_complex(rope_cache)
+
+    # Multiply position encodings
+    rotated_x = x * rope_cache.unsqueeze(0).unsqueeze(0)  # Broadcast to (1, 1, hs/2, T)
+    rotated_x = torch.view_as_real(rotated_x)  # Convert back to real
+    rotated_x = rotated_x.reshape(B, n_head, T, hs)  # Reshape to original shape
     ### END YOUR CODE ###
     return rotated_x
 
@@ -107,7 +104,7 @@ class CausalSelfAttention(nn.Module):
             # store them in rope_cache.
             # Hint: The maximum sequence length is given by config.block_size.
             ### YOUR CODE HERE ###
-            rope_cache = precompute_rotary_emb(dim=config.n_embd, max_positions=config.block_size)
+            rope_cache = precompute_rotary_emb(dim=config.n_embd // config.n_head, max_positions=config.block_size)
             ### END YOUR CODE ###
 
             self.register_buffer("rope_cache", rope_cache)
